@@ -1,0 +1,321 @@
+---
+title: "Práctica final PREDICCIÓN"
+author: "JORGE CASAN VÁZQUEZ"
+date: "17 de enero de 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#**EXECUTIVE SUMMARY**
+
+El objetivo de este informe final es la viabilidad por parte de nuestra empresa Crest de lanzar una campaña publicitaria que aumente significativamente sus ventas y su cuota de mercado y se afianze, no solo en el mercado estadounidense sino también a nivel europeo. Nuestra tarea se va a basar fundamentalmente en estudiar tal viabilidad y realizar predicciones a través de modelos ARIMA y funciones de transferencia, realizando previamente un análisis de los outliers que respalden tal situación.
+
+En la última semana de 1962 la cuota de mercado de Crest era de 0.414 y de Colgate de 0.253. En base a los datos estadísticos fundamentados en el siguiente análisis, las acciones estratégicas que se deben de implementar para aumentar las ventas en las semanas de 1963 y siguientes son las siguientes:
+
+1. Lanzar un nuevo producto,a nivel local, estudiando la viabilidad de expandir su nicho de mercado más allá de los artículos de aseo personal como un artículo de limpieza, como el detergente. Sabiendo que la sede social de Crest está en Cincinnati (Ohio) podríamos estudiar tal opción.
+
+2. Ofertas y descuentos comerciales por comprar un pack de pasta de dientes Crest e hilo dental de más de un 20%.
+
+3. Acuerdos comerciales con proveedores que oferten tales productos y ofertas en grandes estalecimientos comerciales y supermercados.
+
+4. Pocas empresas son conocidas a nivel internacional a principios de los 60. Darse a conocer a través de medios de comunicación en prensa y en radio son fundamentales y establecer un buen sistema logístico de reparto por todo el mercado de EEUU y Europa es fundamental para el abaratamiento de costes de transporte.
+
+Tomado todo ello en su conjunto se mejorará sustancialmente el retorno de la inversión o ROI, el gasto publicitario tendrá un impacto automático en la cuenta de pérdidas y ganancias en el primer trimestre de 1963, según nuestras previsiones ARIMA y ARIMAX.
+
+#**ANÁLISIS EXPLORATORIO DE DATOS**
+
+Del conjunto de datos tenemos 276 observaciones y 4 variables, de las cuales 2 de ellas son el año y la semana.Como primer paso, tenemos que homogeneizar su formato para poder comparar entre las dos empresas. Para ello generaremos la fecha desde la primera semana del año 1958 hasta la última del año 1962. Hemos dejado fuera del espacio muestral los datos para el año 1963 puesto que lo que se trata en esta práctica es predecir las 16 semanas del año en cuestión, para las dos cuotas de mercado.
+
+Representando gráficamente ambas cuotas observamos diferencias:
+
+- Crest: 
+      - Visualmente observamos no estacionalidad, la serie va paulatinamente aumentando. Digno de mención es el salto significativo en un momento del año 1960 que justo parece ocurrir el 1 de Agosto de 1960, en donde en tan solo una semana pasa de tener una cuota de mercado del 0.211 al 0.309, cuando el Consejo de Terapeutica Dental de la "American Dental Association (ADA)" aprobó a Crest como una "ayuda importante en cualquier programa de higiene dental", el cual lo analizaremos en profundidad con los modelos de intervención.
+      - Nos encontramos ante un escalon, y no un impulso, puesto que la tendencia de la serie temporal no se recupera en cuanto a su media, sino que el gráfico se comporta con una tendencia ascendente , de forma suavizada. Por eso, el orden polinomial que se elige es el wBSt.
+      
+
+```{r include=FALSE, echo=FALSE}
+library(openxlsx)
+library(forecast)
+library(xts)
+library(ggplot2)
+library(ggfortify) #Plot Monthplot
+library(TSA)
+library(lmtest)
+
+set.seed(123)
+datosCompletos <- read.xlsx('data.xlsx', colNames = T)
+str(datosCompletos)
+
+
+sum(is.na(datosCompletos))
+
+#Todas son variables de tipo numerico
+#Tendremos que trabajar la columna de la fecha y las semanas
+
+cuotaCrest <- datosCompletos$Crest
+cuotaColgate <- datosCompletos$Colgate
+
+generateDate <- seq(as.Date('1958/01/08'), as.Date('1963/04/23'), by = 'week')
+
+xCuotaCrest <- xts(cuotaCrest, order.by = generateDate)
+xCuotaColgate <- xts(cuotaColgate, order.by = generateDate)
+
+#Vamos a pasarlo a trimestre para operar mejor
+xCuotaCrest <- to.weekly(xCuotaCrest)
+zCuotaCrest <- as.zoo(xCuotaCrest$xCuotaCrest.Close)
+
+xCuotaColgate <- to.weekly(xCuotaColgate)
+zCuotaColgate <- as.zoo(xCuotaColgate$xCuotaColgate.Close)
+
+names(zCuotaCrest) <- 'CuotaMercado'
+names(zCuotaColgate) <- 'CuotaMercado'
+
+```
+
+```{r  out.width = '80%', out.height = '80%'}
+autoplot(zCuotaCrest) + geom_point() +
+  ylab("Cuota mercado")+ggtitle("Cuota semanal Crest")+xlab("Semanas") + 
+  ggtitle('Gráfico cuota mercado Crest')
+```
+
+
+- Colgate: 
+      - Visualmente observamos no estacionalidad, al igual que con Crest, la serie va paulatinamente descendiendo. Prácticamente en la misma fecha, en donde la ADA mencionaba a Crest como empresa comprometida con la higiene bucal, Colgate pasa de tener en tal sólo una semana una reducción de su cuota de mercado del 0.345 al 0.291.
+      - Al igual que con el gráfico de Crest, nos encontramos ante un escalon, y no un impulso, puesto que la tendencia de la serie temporal no se recupera en cuanto a su media, sino que el gráfico se comporta con una tendencia ascendente , de forma suavizada. Por eso, el orden polinomial que se elige es el wBSt.
+
+
+```{r  out.width = '80%', out.height = '80%'}
+autoplot(zCuotaColgate) + geom_point() +
+  ylab("Cuota mercado") + ggtitle("Gráfico Cuota mercado Colgate") + xlab("Semanas") + 
+  ggtitle('Representacion Colgate')
+```
+
+```{r include=FALSE, echo=FALSE}
+#Select number of observation to compare forecast
+#Quitamos 16 semanas de 1963
+cOmit = 16
+
+#Data Size
+nObs = length(zCuotaCrest)
+
+#sub_sample
+#oVentasCrest=zCuotaCrest[1:(nObs-cOmit),]
+oVentasCrest <- window(zCuotaCrest, start = index(zCuotaCrest[1]), end = index(zCuotaCrest[nObs - cOmit]))
+oVentasColgate <- window(zCuotaColgate, start = index(zCuotaColgate[1]), end = index(zCuotaColgate[nObs - cOmit]))
+```
+
+·**MODELO ARIMA**
+
+El modelo ARIMA (modelo autoregresivo integrado de medias móviles) es un modelo estadístico que utiliza variaciones y regresiones de datos estadísticos con el fin de encontrar patrones para una predicción hacia el futuro. Se trata de un modelo dinámico de series temporales, es decir, las estimaciones futuras vienen explicadas por los datos del pasado y no por variables independientes.
+
+Una serie no estacionaria puede convertirse en estacionaria gracias al modelo ARIMA, en donde a través de la conversión logarítmica podemos convertir la varianza en estacionaria y por otra parte a través de su conversión diferencial podemos convertir la media en estacionaria 
+
+Vamos a determinar el auto arima que deseamos y para ello tendremos que elegir, de entre diferentes modelos, aquel que sea más preciso y para ello escogeremos aquel que tenga menos AIC.
+
+Por una parte, en Crest el mejor es un ARIMA (0,1,1) con un AIC de -864,15, en donde se comprueba queel modelo es estacionaria pero no tiene un componente estacional.
+
+```{r  out.width = '60%', out.height = '60%'}
+fit1 = auto.arima(oVentasCrest)
+summary(fit1)
+```
+
+Por otra parte, en Colgate el mejor ARIMA, tambien es un ARIMA (0,1,1) con un AIC de -833,14. Al igual que en el anterior, es un modelo estacionario en media y varianza pero sin embargo no tiene componente estacional.
+
+
+```{r include=FALSE, echo=FALSE}
+arima.colgate <- auto.arima(oVentasColgate)
+summary(arima.colgate)
+```
+
+A continuación realizamos el análisis de los residuos con la función de autocorrelación simple (ACF) y con la función de autocorrelación parcial (PACF), viendo que no se salgan de las franjas azules.
+
+Para Crest vemos que los residuos se comportan como ruido blanco, tanto en ACF como PACF
+```{r include=FALSE, echo=FALSE}
+arima.crest = auto.arima(oVentasCrest)
+summary(arima.crest)
+```
+
+```{r  out.width = '70%', out.height = '70%'}
+ggtsdisplay(arima.crest$residuals)
+```
+
+Realizamos el mismo análisis para Colgate y vemos que también son ruido blanco
+
+```{r include=FALSE, echo=FALSE}
+arima.colgate <- auto.arima(oVentasColgate)
+summary(arima.colgate)
+```
+
+```{r  out.width = '70%', out.height = '70%'}
+ggtsdisplay(arima.colgate$residuals)
+```
+
+Adiconalmente vemos que tanto en Crest como en Colgate los residuos tienen una distribución normal
+
+```{r  out.width = '70%', out.height = '70%'}
+checkresiduals(arima.crest)
+```
+
+Si bien con el impacto visual veíamos que los residuos se comportaban como ruido blanco, estadísticamente a través del test Box- Ljung, que no es más que un tipo de prueba estadística de si un grupo de autocorrelaciones de una serie temporal son diferentes de cero. La hipotesis nula asume que existe ruido blanco. 
+
+Con un p-valor muy superior al nivel de significación del 5% no podemos rechazar la hipótesis nula, corroborando la información proporcionada por los residuos, comportándose como tales como ruido blanco. Aplicando mayores retardos vemos que el p-valor escada vez mayor.
+
+```{r  out.width = '70%', out.height = '70%'}
+Box.test(arima.crest$residuals,lag = 3, fitdf = 1, type = "Lj")
+```
+
+Realizamos el mismo test con Colgate y vemos que exactamente se llegan a las mismas conclusiones
+
+```{r  out.width = '70%', out.height = '70%'}
+Box.test(arima.colgate$residuals,lag = 3, fitdf = 1, type = "Lj")
+```
+
+La predicción para el modelo ARIMA (0,1,1) de Crest es
+
+```{r  out.width = '70%', out.height = '70%'}
+fventas.crest = forecast(arima.crest, h = 16)
+plot(fventas.crest)
+```
+
+La predicción para el modelo ARIMA (0,1,1) de Colgate es
+
+```{r  out.width = '70%', out.height = '70%'}
+fventas.colgate = forecast(arima.colgate, h = 16)
+plot(fventas.colgate)
+```
+
+#**DETECCIÓN DE OUTLIERS**
+
+Los outliers pueden crear estructuras de autocorrelación espurias, que se evitan añadiendo componentes de intervención. Existen dos tipos de outliers, los aditivos (AO), los cuales afectan a la serie temporal; y los innovativos (IO), los cuales afectan a los residuos.
+
+Para Crest no existen outliers innovativos, sin embargo, sí que existen outliers aditivos en la semana 135, 136 y 138
+
+```{r}
+detectAO(arima.crest) 
+detectIO(arima.crest)
+```
+
+Para Colgateno existen tanto outliers innovativos ni outliers aditivos
+
+```{r}
+detectAO(arima.colgate)
+detectIO(arima.colgate)
+```
+
+#**ANÁLISIS DE INTERVENCIÓN**
+
+La intervención puede deberse al registro de datos erróneos o a observacioes ausentes. En ocasiones, las intervenciones dan lugar a valores atípicos (outliers) que resultan muy improbables dada la historia pasada de la serie temporal. Un modelo de intervención puede utilizarse para:
+
+- Evaluar a posteriori la eficacia de una medida. En nuestro caso el anuncio por parte de la ADA de que Crest era una ayuda importante en cualquier programa de higiene dental.
+
+- Homogeneizar y corregir la correspondiente serie temporal
+
+- Limpiar estructuras de autocorrelación espurias, creadas por los outliers
+
+Para el análisis de intervención de Crest en donde el AIC es -882,72, en donde los coeficientes, tanto de la media móvil como el outlier aditivo a partir de la semana 135, son estadísticamente significativos con ***
+
+```{r}
+crest.arimax1 = arimax(oVentasCrest, order = c(0, 1, 1),
+                      xtransf = data.frame(primero = 1*(seq(oVentasCrest) >= 135)),
+                      
+                      transfer = list(c(0,0)),
+                      method = 'ML')
+
+crest.arimax1
+
+coeftest(crest.arimax1)
+```
+
+
+Para el análisis de intervención de Colgate en donde el AIC es -845,01, en donde los coeficientes,al igual que con los coeficientes de Crest, tanto de la media móvil como el outlier aditivo a partir de la semana 135, son estadísticamente significativos con ***
+
+```{r}
+colgate.arimax = arimax(oVentasColgate, order = c(0, 1, 1),
+                        xtransf = data.frame(first = 1*(seq(oVentasColgate) >= 135)
+                        ),
+                        transfer = list(c(0,0)),
+                        method = 'ML')#Maxima verosimilitud
+
+
+
+```
+
+```{r include=FALSE, echo=FALSE}
+colgate.arimax
+```
+
+```{r}
+coeftest(colgate.arimax)
+```
+
+#**FUNCIÓN DE TRANSFERENCIA**
+
+La función de transferencia es una herramienta que nos permite analizar cómo se comportará un determinado proceso (anuncio por parte de la ADA), a medida que el tiempo va pasando. La función de transferencia es la forma básica de describir modelos de sistemas lineales basada en la transformación de Laplace, en donde permite obtener la respuesta temporal, la respuesta estática y la respuesta en frecuencia.
+
+
+```{r include=FALSE, echo=FALSE}
+library(astsa)
+library(Hmisc)
+library(dynlm) #regresion dinamica
+```
+
+
+```{r include=FALSE, echo=FALSE}
+crest_134 <- window(cuotaCrest, end=134) #ventas, nos quedamos con los 134 primeros porque a partir del 135 la cosa cambia
+colgate_134 <- window(cuotaColgate, end=134) #lead es publicidad, 140 primeros
+
+
+crest_134_D <- diff(crest_134) # para hacerlas estacionarias usamos diff
+colgate_134_D <- diff(colgate_134) # quitarle la media es indiferente, con usar diff sobra
+```
+
+Realizamos la función de transferencia con 15 de numerador, vemos que solo dos coeficientes son los estadísticamente significativos
+```{r  out.width = '70%', out.height = '70%'}
+#funcion inicial de transferencia
+mod0 <- arimax(colgate_134_D,
+               order=c(0,1,1),
+               include.mean=TRUE,
+               xtransf=crest_134_D,
+               transfer=list(c(0,15)),
+               method="ML")
+
+coeftest(mod0)
+```
+
+Con nuestro modelo ARIMA (0,1,1) obtenemos un AIC de -304,59 y un RMSE mínimo de 0,0555
+
+```{r include=FALSE, echo=FALSE}
+summary(mod0) #aqui los que son significativos son positivos
+```
+
+Con respecto a los residuos tanto en ACF como en PACF observamos que sobresalen las franjas azules, por lo que concluimos que los residuos no se comportan como ruido blanco
+
+```{r  out.width = '70%', out.height = '70%'}
+tsdisplay(mod0$residuals)
+```
+
+Representando gráficamente la función de transferencia con 15 retardos vemos que el evento acontecido el 1 de Agosto de 1960, tras el anuncio de la ADA, ha sido muy significativo para la semana en particular que provocó una bajada sustancial de la cuota de mercado de Colgate y paralelamente un aumento sustancial de Crest
+
+```{r  out.width = '70%', out.height = '70%'}
+plot(mod0$coef[2:15], type = 'h', main = "Efecto de los 15 retardos")
+```
+
+
+#**CONCLUSIONES**
+
+En base al análisis de intervención podemos asegurar que el gasto en publicidad por parte de nuestro director de Marketing va ha resultar efectivo, siendo especialmente significativo a partir del primer trimestre del año siguiente. Si bien las acciones que se deberían de implementar para aumentar el ROI, captando nuevos clientes no solo en el mercado estadounidense sino también europeo, así como fidelizar a nuestros clientes en la parte noreste de EEUU (Cincinnati y alrededores) son las siguientes (tales medidas se encuentran en el Executive Summary:
+
+1. Lanzamiento un nuevo producto,a nivel local,como el detergente y ver el impacto que tiene en las ventas y en el ROI.
+
+2. Descuentos de más de un 20% por comprar un pack de pasta de dientes Crest e hilo dental en establecimientos comerciales y en supermercados, para ello tendremos ue acordar precios con nuestros proveedores.
+
+4. Pocas empresas son conocidas a nivel internacional a principios de los 60. Darse a conocer a través de medios de comunicación en prensa y en radio son fundamentales y establecer un buen sistema logístico de reparto por todo el mercado de EEUU y Europa es fundamental para el abaratamiento de costes de transporte.
+
+Enlace a GitHub:
+
+
+
